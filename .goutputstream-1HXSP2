@@ -1,0 +1,446 @@
+#include <assert.h> /*assert*/
+#include <stdlib.h> /*malloc free size_t*/
+
+#include "avl.h"
+
+#define LEFT child[0]
+#define RIGHT child[1]
+#define NUM_OF_CHILDREN 2
+#define LEAF_HEIGHT 1
+#define MAX(x, y) x > y ? x : y
+
+struct avl
+{
+	struct avl_node *root;
+	avl_cmp_func_t cmp_func;
+};
+
+
+struct avl_node
+{
+	void *data;
+	struct avl_node *child[NUM_OF_CHILDREN];
+	size_t height;
+};
+
+typedef struct avl_node *node_t;
+
+static node_t CreateNode(void *data);
+static void AVLDestroyNode(node_t node);
+static size_t CountNodes(const node_t node);
+static size_t NodeHeight(const node_t node);
+static void UpdateHeight(node_t node);
+static int GetBalance(node_t node);
+static node_t AVLInsertNode(node_t node, node_t new_node, avl_cmp_func_t compare);
+static node_t RotateRight(node_t root);
+static node_t RotateLeft(node_t root);
+static node_t FixBalance(node_t node, int balance);
+node_t AVLFindNode(node_t node, const void *data, avl_cmp_func_t compare);
+int AVLForEachNode(node_t node, avl_action_func_t action, void* params);
+static node_t MinValueNode(node_t node);
+static node_t AVLRemoveNode(node_t root, void *data, avl_cmp_func_t compare);
+
+/**************************************** AVL ******************************/
+
+avl_t *AVLCreate(avl_cmp_func_t compare)
+{
+	avl_t *tree = NULL;
+	
+	assert(NULL != compare);
+	
+	tree = (avl_t *)malloc(sizeof(struct avl));
+	if(NULL == tree)
+	{
+		return NULL;
+	}
+	
+	tree->root = NULL;
+	tree->cmp_func = compare;
+	
+	return tree;
+}
+
+
+
+void AVLDestroy(avl_t *tree)
+{
+	assert(NULL != tree);
+	
+	AVLDestroyNode(tree->root);
+	free(tree);
+}
+
+
+static void AVLDestroyNode(node_t node)
+{
+	if (node == NULL)
+	{
+		return;
+	}
+
+	AVLDestroyNode(node->LEFT);
+	AVLDestroyNode(node->RIGHT);
+	free(node);
+}	
+	
+
+
+int AVLIsEmpty(const avl_t *tree)
+{
+	assert(NULL != tree);
+	
+	return (tree->root == NULL);
+}
+
+
+
+size_t AVLHeight(const avl_t *tree)
+{
+	if (tree->root == NULL)
+	{
+		return 0;
+	}
+
+	return tree->root->height;
+}
+
+
+
+size_t AVLCount(const avl_t *tree)
+{
+	size_t count = 0;
+	assert(NULL != tree);
+	
+	count = CountNodes(tree->root);
+	return count;
+}
+
+
+
+static size_t CountNodes(const node_t node)
+{
+	if(NULL == node)
+	{
+		return 0;
+	}
+	
+	return 1 + CountNodes(node->LEFT) + CountNodes(node->RIGHT);
+}
+
+
+
+int AVLInsert(avl_t *tree, void *data)
+{	
+	node_t new_node = NULL;
+	
+	assert(NULL != tree);
+	assert(NULL != tree->cmp_func);
+	
+	new_node = CreateNode(data);
+	if(NULL == new_node)
+	{
+		return 1;
+	}
+	
+	if(AVLIsEmpty(tree))
+	{
+		tree->root = new_node;
+		return 0;
+	}
+	
+	tree->root = AVLInsertNode(tree->root, new_node, tree->cmp_func);
+	
+	return 0;
+}
+
+
+static node_t AVLInsertNode(node_t node, node_t new_node, avl_cmp_func_t compare)
+{
+	int result_from_cmp_func = 0;
+	int balance = 0;
+	result_from_cmp_func = compare(node->data, new_node->data);
+	
+	
+	if(0 > result_from_cmp_func)
+	{
+		if(NULL == node->RIGHT)
+		{
+			node->RIGHT = new_node;
+		}
+		else
+		{
+			node->RIGHT = AVLInsertNode(node->RIGHT, new_node, compare);
+		}
+	}
+	else
+	{
+		if(NULL == node->LEFT)
+		{
+			node->LEFT = new_node;
+		}
+		else
+		{
+			node->LEFT = AVLInsertNode(node->LEFT, new_node, compare);
+		}
+	}
+	
+	UpdateHeight(node);
+	
+	balance = GetBalance(node);
+	
+	return FixBalance(node, balance);
+}
+
+
+void *AVLFind(const avl_t *tree, const void *data)
+{
+	node_t node_found = NULL;
+	
+	assert(NULL != tree);
+	assert(NULL != tree->cmp_func);
+	
+	node_found = AVLFindNode(tree->root, data, tree->cmp_func);
+	
+	return (NULL == node_found) ? NULL : node_found->data;
+}
+
+
+node_t AVLFindNode(node_t node, const void *data, avl_cmp_func_t compare)
+{
+	int result_from_cmp_func = 0;
+	
+	if(NULL == node)
+	{
+		return NULL;
+	}
+	
+	result_from_cmp_func = compare(node->data, data);
+	
+	if(0 > result_from_cmp_func)
+	{
+		return AVLFindNode(node->RIGHT, data, compare);
+	}
+	else if(0 < result_from_cmp_func)
+	{
+		return AVLFindNode(node->LEFT, data, compare);
+	}
+	else
+	{
+		return node;
+	}
+}
+	
+	
+
+int AVLForEach(avl_t *tree, avl_action_func_t action, void* params)
+{
+	assert(NULL != tree);
+	assert(NULL != action);
+
+	return AVLForEachNode(tree->root, action, params);
+}
+
+	
+int AVLForEachNode(node_t node, avl_action_func_t action, void* params)
+{
+	int status = 0;
+	
+	if(NULL == node)
+	{
+		return 0;
+	}
+	
+	status = AVLForEachNode(node->LEFT, action, params);
+	status = action(node->data, params);
+	status = AVLForEachNode(node->RIGHT, action, params);
+	
+	return status;
+}
+
+
+
+void AVLRemove(avl_t *tree, void *data)
+{
+	assert(NULL != tree);
+	assert(NULL != tree->cmp_func);
+    
+	tree->root = AVLRemoveNode(tree->root, data, tree->cmp_func);
+}
+
+
+static node_t AVLRemoveNode(node_t root, void *data, avl_cmp_func_t compare)
+{
+	int cmp_result = 0;
+	int balance = 0;
+	if (root == NULL)
+	{
+		return NULL;
+	}
+
+	cmp_result = compare(root->data, data);
+
+	if (cmp_result > 0)
+	{
+		root->LEFT = AVLRemoveNode(root->LEFT, data, compare);
+	}
+	else if (cmp_result < 0)
+	{
+		root->RIGHT = AVLRemoveNode(root->RIGHT, data, compare);
+	}
+	else
+	{
+		if (NULL == root->LEFT || NULL == root->RIGHT)
+		{
+			node_t temp = root->LEFT ? root->LEFT : root->RIGHT;
+            
+			if (NULL == temp)
+			{
+				temp = root;
+				root = NULL;
+			}
+			else
+			{
+				*root = *temp;
+			}
+            
+			free(temp);
+		}
+		else
+		{
+			node_t temp = MinValueNode(root->RIGHT);
+			root->data = temp->data;
+			root->RIGHT = AVLRemoveNode(root->RIGHT, temp->data, compare);
+		}
+	}
+
+	if (NULL == root)
+	{
+		return NULL;
+	}
+
+	UpdateHeight(root);
+
+	balance = GetBalance(root);
+    
+	return FixBalance(root, balance);
+}
+/***********************************  Helpers *******************************/
+static node_t CreateNode(void *data)
+{
+	node_t new_node = (node_t)malloc(sizeof(struct avl_node));
+
+	if(NULL == new_node)
+	{
+		return NULL;
+	}
+	
+	new_node->data = data;
+	new_node->RIGHT = NULL;
+	new_node->LEFT = NULL;
+	new_node->height = LEAF_HEIGHT;
+	
+	return new_node;
+}	
+	
+
+
+static size_t NodeHeight(const node_t node)
+{
+	return (node == NULL) ? 0 : node->height;
+}
+
+
+static int GetBalance(node_t node)
+{
+	return (node == NULL) ? 0 : NodeHeight(node->LEFT) - NodeHeight(node->RIGHT);
+}
+
+	
+static void UpdateHeight(node_t node)
+{
+	size_t left_height = 0;
+	size_t right_height = 0;
+	assert(NULL != node);
+	
+	left_height = NodeHeight(node->LEFT);
+	right_height = NodeHeight(node->RIGHT);
+	node->height = 1 + MAX(left_height, right_height);
+}
+
+
+static node_t RotateRight(node_t root)
+{
+	node_t pivot = root->LEFT;
+	node_t pivot_right = pivot->RIGHT; 
+  
+	pivot->RIGHT = root; 
+	root->LEFT = pivot_right; 
+  
+	UpdateHeight(root);
+	UpdateHeight(pivot);
+  
+	return pivot;
+}
+	
+	
+	
+	
+static node_t RotateLeft(node_t root)
+{
+	node_t pivot = root->RIGHT; 
+	node_t pivot_left = pivot->LEFT; 
+  
+	pivot->LEFT = root; 
+	root->RIGHT = pivot_left; 
+  
+	UpdateHeight(root);
+	UpdateHeight(pivot);
+  
+	return pivot;	
+}
+
+
+
+static node_t FixBalance(node_t node, int balance)
+{
+	/* RR case: */
+	if(balance < -1 &&  0 >= GetBalance(node->RIGHT))
+	{
+		return RotateLeft(node);
+	}
+	
+	/* RL case: */
+	if(balance < -1 && 1 == GetBalance(node->RIGHT))
+	{
+		node->RIGHT = RotateRight(node->RIGHT);
+		return RotateLeft(node);
+	}
+	
+	/* LL case: */
+	if(balance > 1 && 0 <= GetBalance(node->LEFT))
+	{
+		return RotateRight(node);
+	}
+		
+	/* LR case: */
+	if(balance > 1 && -1 == GetBalance(node->LEFT))
+	{
+		node->LEFT = RotateLeft(node->LEFT);
+		return RotateRight(node);
+	}
+	
+	return node;
+}
+
+
+static node_t MinValueNode(node_t node)
+{
+	node_t current = node;
+    
+	while (current->LEFT != NULL)
+	{
+		current = current->LEFT;
+	}
+
+	return current;
+}
