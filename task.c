@@ -1,12 +1,3 @@
-/* 
-   Code by: Or Yamin    
-   Project: task for scheduler data structure
-   Date: 1/06/24
-   Review by: Ido
-   Review Date: 02/06/24
-   Approved by: Ido
-   Approval Date: 02/06/24
-*/
 
 #include <stdlib.h> /* malloc, free */
 #include <assert.h> /* assert */
